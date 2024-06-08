@@ -5,9 +5,9 @@
     <div class="col-md-4">
       <div class="user-list-card">
         <div class="user-card"
-             [ngClass]="user?.phone === selectedUser?.phone ? 'active' : null"
-             *ngFor="let user of userList"
-             (click)="user?.phone && selectUserHandler(user.phone)">
+             [ngClass]="user?.login === selectedUser?.login ? 'active' : null"
+             *ngFor="let user of onlineUsers"
+             (click)="user?.login && selectUserHandler(user.login)">
           <img [src]="user?.image" [alt]="user?.name" class="avatar" />
           <p class="username">{{user?.name}}</p>
         </div>

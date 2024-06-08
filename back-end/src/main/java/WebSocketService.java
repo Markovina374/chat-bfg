@@ -2,12 +2,16 @@ import io.vertx.core.AbstractVerticle;
 import io.vertx.core.AsyncResult;
 import io.vertx.core.Future;
 import io.vertx.core.Handler;
+import io.vertx.core.eventbus.Message;
 import io.vertx.core.http.HttpServer;
 import io.vertx.core.http.ServerWebSocket;
+import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 public class WebSocketService extends AbstractVerticle {
     private final Map<String, ServerWebSocket> webSocketMap = new HashMap<>();
@@ -16,6 +20,7 @@ public class WebSocketService extends AbstractVerticle {
     public void start() {
         HttpServer server = vertx.createHttpServer();
         server.webSocketHandler(this::handleWebSocket).listen(8090);
+        vertx.eventBus().consumer("user.statusChanged", this::handleUserStatusChanged);
     }
 
     private void handleWebSocket(ServerWebSocket ws) {
@@ -24,7 +29,6 @@ public class WebSocketService extends AbstractVerticle {
         ws.handler(buffer -> {
             String message = buffer.toString();
             System.out.println("Received message: " + message);
-
             JsonObject json = new JsonObject(message);
             JsonObject data = json.getJsonObject("data");
             String event = json.getString("event");
@@ -41,6 +45,9 @@ public class WebSocketService extends AbstractVerticle {
                 case "register":
                     handleRegistration(ws, data);
                     break;
+                case "getOnlineUsers":
+                    handleOnlineUsers(ws);
+                    break;
                 default:
                     System.err.println("Unknown event: " + event);
             }
@@ -53,7 +60,7 @@ public class WebSocketService extends AbstractVerticle {
             if (wsKey != null) {
                 if (webSocketMap.containsKey(wsKey)) {
                     webSocketMap.remove(wsKey);
-
+                    vertx.eventBus().send("user.disconnected", wsKey);
                     // Notify RedisVerticle to unsubscribe
                     JsonObject closeMessage = new JsonObject()
                         .put("action", "unsubscribe")
@@ -72,6 +79,8 @@ public class WebSocketService extends AbstractVerticle {
             System.err.println("WebSocket error: " + exception.getMessage());
         });
     }
+
+
 
     private void handleJoin(ServerWebSocket ws, JsonObject data) {
         String token = ws.headers().get("jwt_token");
@@ -170,6 +179,10 @@ public class WebSocketService extends AbstractVerticle {
                         .put("token", response.getString("token"))
                             .put("user", login)
                         .encode());
+                    vertx.eventBus().send("user.connected", new JsonObject()
+                        .put("login", login)
+                        .put("socketId", ws.headers().get("Sec-WebSocket-Key")));
+                    webSocketMap.put(ws.headers().get("Sec-WebSocket-Key"), ws);
                 } else {
                     // Handle authentication failure
                     ws.writeTextMessage(new JsonObject().put("status", "error").put("message", response.getString("message")).encode());
@@ -215,5 +228,33 @@ public class WebSocketService extends AbstractVerticle {
                 resultHandler.handle(Future.failedFuture(reply.cause()));
             }
         });
+    }
+
+
+    private void handleOnlineUsers(ServerWebSocket ws) {
+        vertx.eventBus().request("user.getOnline", null, reply -> {
+            if (reply.succeeded()) {
+                JsonObject response = (JsonObject) reply.result().body();
+                JsonArray onlineUsers = response.getJsonArray("onlineUsers");
+                if (onlineUsers != null) {
+                    ws.writeTextMessage(new JsonObject().put("event", "onlineUsers").put("onlineUsers", onlineUsers).encode());
+                } else {
+                    ws.writeTextMessage(new JsonObject().put("event", "error").put("message", "No online users found").encode());
+                }
+            } else {
+                ws.writeTextMessage(new JsonObject().put("event", "error").put("message", "Failed to get online users").encode());
+            }
+        });
+    }
+
+    private void handleUserStatusChanged(Message<JsonObject> message) {
+        JsonObject body = message.body();
+        JsonObject onlineUsersJson = body.getJsonObject("onlineUsers");
+        String encode = new JsonObject().put("event", "user.statusChanged").put("onlineUsers", onlineUsersJson).encode();
+
+        for (Map.Entry<String, ServerWebSocket> entry : webSocketMap.entrySet()) {
+            ServerWebSocket socket = entry.getValue();
+            socket.writeTextMessage(encode);
+        }
     }
 }

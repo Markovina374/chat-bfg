@@ -7,6 +7,6 @@ public class MainVerticle {
         vertx.deployVerticle(new JwtAuthVerticle());
         vertx.deployVerticle(new WebSocketService());
         vertx.deployVerticle(new RedisVerticle());
-
+        vertx.deployVerticle(new UserStatusVerticle());
     }
 }

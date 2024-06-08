@@ -17,7 +17,7 @@ export class AppComponent implements OnInit {
   public currentUser?: User;
   public selectedUser?: User;
 
-  public userList: User[] = [];
+  public onlineUsers: User[] = [];
 
   constructor(
     private chatService: ChatService,
@@ -31,6 +31,8 @@ export class AppComponent implements OnInit {
     } else {
       // Fetch user details and initialize the chat
       this.initializeChat();
+      this.loadOnlineUsers();
+      this.subscribeToUserStatusChanges();
     }
   }
 
@@ -56,36 +58,50 @@ export class AppComponent implements OnInit {
 
     // Fetch user and user list from server or local storage
     this.currentUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
-    this.loadAllUsers();
     this.showScreen = true;
   }
 
-  loadAllUsers(): void {
-    this.chatService.getAllUsers().subscribe(
-      (data) => {
-        this.userList = data.users;
-        console.log('Users:', this.userList);
+  loadOnlineUsers(): void {
+    this.chatService.getOnlineUsers().then(users => {
+      this.onlineUsers = users;
+      this.onlineUsers.forEach(user => {
+        user.image = `assets/user/${this.getRandomImageNumber()}.png`;
+      });
+    }).catch(error => {
+      console.error('Failed to load online users:', error);
+    });
+  }
+
+  getRandomImageNumber(): number {
+    return Math.floor(Math.random() * 11) + 1;
+  }
+
+  subscribeToUserStatusChanges(): void {
+    this.chatService.subscribeToUserStatusChanges().subscribe(
+      (users) => {
+        this.onlineUsers = users;
+        this.onlineUsers.map(x => x.image = `assets/user/${this.getRandomImageNumber()}.png`)
       },
       (error) => {
-        console.error('Failed to load users:', error);
+        console.error('Failed to subscribe to user status changes:', error);
       }
     );
   }
 
-  selectUserHandler(phone: string): void {
-    const user = this.userList.find(user => user.phone === phone);
+  selectUserHandler(login: string): void {
+    const user = this.onlineUsers.find(user => user.login === login);
     if (user && this.currentUser) {
       this.selectedUser = user;
-      this.roomId = this.getRoomId(this.currentUser.id, user.id);
+      this.roomId = this.getRoomId(this.currentUser.login, user.login);
       // Load previous messages if any
       this.messageArray.set(this.roomId, this.messageArray.get(this.roomId) || []);
 
-      this.join(this.currentUser.name, this.roomId);
+      this.join(this.currentUser.login, this.roomId);
     }
   }
 
-  getRoomId(userId: number, selectedUserId: number): string {
-    const sortedIds = [userId, selectedUserId].sort((a, b) => a - b);
+  getRoomId(userId: string, selectedUserId: string): string {
+    const sortedIds = [userId, selectedUserId].sort((a, b) => a.localeCompare(b));
     return `room-${sortedIds.join('-')}`;
   }
 
@@ -100,10 +116,10 @@ export class AppComponent implements OnInit {
     if (this.messageText && this.currentUser && this.roomId) {
       const timestamp = new Date().toISOString();
       const messageData: MessageResponse = {
-        user: this.currentUser.name,
+        user: this.currentUser.login,
         room: this.roomId,
         message: this.messageText,
-        timestamp: timestamp
+        date: timestamp
       };
 
       const token = localStorage.getItem('token');
@@ -113,7 +129,7 @@ export class AppComponent implements OnInit {
         // Update local message array to display sent message immediately
         const messages = this.messageArray.get(this.roomId) || [];
         messages.push({
-          userName: this.currentUser.name,
+          userName: this.currentUser.login,
           message: this.messageText,
           timestamp: timestamp
         });

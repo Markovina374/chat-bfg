@@ -1,7 +1,7 @@
 import { Injectable } from '@angular/core';
-import { Observable, Subject } from 'rxjs';
+import {filter, first, map, Observable, Subject} from 'rxjs';
 import { WebSocketSubject } from 'rxjs/webSocket';
-import { MessageResponse } from "../../models";
+import {MessageResponse, User} from "../../models";
 
 @Injectable({
   providedIn: 'root'
@@ -74,16 +74,13 @@ export class ChatService {
   }
 
 
-  getAllUsers(): Observable<any> {
-    const subject = new Subject<any>();
-
-    this.socket$.next({ event: 'getAllUsers' });
+  subscribeToUserStatusChanges(): Observable<User[]> {
+    const subject = new Subject<User[]>();
 
     this.socket$.subscribe(
       (msg) => {
-        if (msg.event === 'getAllUsers') {
-          subject.next(msg.data);
-          subject.complete();
+        if (msg.event === 'user.statusChanged') {
+          subject.next(msg.onlineUsers);
         }
       },
       (err) => {
@@ -92,6 +89,16 @@ export class ChatService {
     );
 
     return subject.asObservable();
+  }
+
+  getOnlineUsers(): Promise<User[]> {
+    this.socket$.next({ event: 'getOnlineUsers' });
+
+    return this.socket$.pipe(
+      filter(msg => msg.event === 'onlineUsers'),
+      map(msg => msg.onlineUsers),
+      first()
+    ).toPromise();
   }
 
   getStorage(): any[] {
