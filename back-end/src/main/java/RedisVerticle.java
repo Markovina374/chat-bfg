@@ -1,4 +1,5 @@
 import io.vertx.core.AbstractVerticle;
+import io.vertx.core.eventbus.Message;
 import io.vertx.core.json.JsonObject;
 import io.vertx.redis.client.Command;
 import io.vertx.redis.client.Redis;
@@ -25,6 +26,23 @@ public class RedisVerticle extends AbstractVerticle {
             .setMaxWaitingHandlers(512);
         redis = Redis.createClient(vertx, options);
 
+        vertx.eventBus().consumer("redis.auth", message -> {
+            JsonObject json = (JsonObject) message.body();
+            String action = json.getString("action");
+
+            switch (action) {
+                case "register":
+                    handleRegister(message, json);
+                    break;
+                case "authenticate":
+                    handleAuthenticate(message, json);
+                    break;
+                default:
+                    System.err.println("Unknown action: " + action);
+                    message.fail(1, "Unknown action");
+            }
+        });
+
         vertx.eventBus().consumer("redis.action", message -> {
             JsonObject json = (JsonObject) message.body();
             String action = json.getString("action");
@@ -44,6 +62,39 @@ public class RedisVerticle extends AbstractVerticle {
                 default:
                     System.err.println("Unknown action: " + action);
             }
+        });
+    }
+
+    private void handleRegister(Message<Object> message, JsonObject data) {
+        String login = data.getString("login");
+        String password = data.getString("password");
+
+        redis.send(Request.cmd(Command.HSET)
+            .arg("user:" + login)
+            .arg("password")
+            .arg(password)).onSuccess(res -> {
+            System.out.println("User registered: " + login);
+            message.reply(new JsonObject().put("status", "ok"));
+        }).onFailure(err -> {
+            System.err.println("Failed to register user: " + err.getMessage());
+            message.reply(new JsonObject().put("status", "error").put("message", "Registration failed"));
+        });
+    }
+
+    private void handleAuthenticate(Message<Object> message, JsonObject data) {
+        String login = data.getString("login");
+        String password = data.getString("password");
+
+        redis.send(Request.cmd(Command.HGET)
+            .arg("user:" + login).arg("password")).onSuccess(res -> {
+            if (res != null && PasswordHelper.isValid(res.toBytes(), password)) {
+                message.reply(new JsonObject().put("status", "ok"));
+            } else {
+                message.reply(new JsonObject().put("status", "error").put("message", "Invalid credentials"));
+            }
+        }).onFailure(err -> {
+            System.err.println("Failed to authenticate user: " + err.getMessage());
+            message.reply(new JsonObject().put("status", "error").put("message", "Authentication failed"));
         });
     }
 
@@ -119,4 +170,5 @@ public class RedisVerticle extends AbstractVerticle {
             err.printStackTrace();
         });
     }
+
 }

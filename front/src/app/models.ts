@@ -11,18 +11,23 @@ export interface Message {
   timestamp: string;
 }
 
-
 export interface MessageResponse {
-  user: any;
+  user: string;
   room: string;
   message: string;
   timestamp: string;
 }
 
-
-export interface StorageItem {
-  roomId: string;
-  chats: Message[];
+export interface AuthResponse {
+  token: string;
+  user: User;
 }
 
-
+export interface AuthRequest {
+  event: string;
+  data: {
+    phone: string;
+    password: string;
+    name?: string;
+  };
+}

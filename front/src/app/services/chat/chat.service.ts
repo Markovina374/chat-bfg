@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core';
-import { Observable } from 'rxjs';
+import { Observable, Subject } from 'rxjs';
 import { WebSocketSubject } from 'rxjs/webSocket';
 import { MessageResponse } from "../../models";
 
@@ -34,6 +34,64 @@ export class ChatService {
         this.socket$.complete();
       };
     });
+  }
+
+  login(data: any): Observable<any> {
+    const loginSubject = new Subject<any>();
+    this.socket$.next({ event: 'auth', data });
+
+    this.socket$.subscribe({
+      next: (msg) => {
+        console.log(msg)
+        if (msg.status === 'authenticated') {
+          loginSubject.next(msg);
+          loginSubject.complete();
+        }
+      },
+      error: (err) => loginSubject.error(err),
+      complete: () => loginSubject.complete()
+    });
+
+    return loginSubject.asObservable();
+  }
+
+  register(data: any): Observable<any> {
+    const registerSubject = new Subject<any>();
+    this.socket$.next({ event: 'register', data });
+
+    this.socket$.subscribe({
+      next: (msg) => {
+        if (msg.event === 'register_response') {
+          registerSubject.next(msg.data);
+          registerSubject.complete();
+        }
+      },
+      error: (err) => registerSubject.error(err),
+      complete: () => registerSubject.complete()
+    });
+
+    return registerSubject.asObservable();
+  }
+
+
+  getAllUsers(): Observable<any> {
+    const subject = new Subject<any>();
+
+    this.socket$.next({ event: 'getAllUsers' });
+
+    this.socket$.subscribe(
+      (msg) => {
+        if (msg.event === 'getAllUsers') {
+          subject.next(msg.data);
+          subject.complete();
+        }
+      },
+      (err) => {
+        subject.error(err);
+      }
+    );
+
+    return subject.asObservable();
   }
 
   getStorage(): any[] {

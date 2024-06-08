@@ -1,27 +1,32 @@
-import { BrowserModule } from '@angular/platform-browser';
 import { NgModule } from '@angular/core';
-import { HttpClientModule } from '@angular/common/http';
-import { FormsModule } from '@angular/forms';
-import { NgbModule } from '@ng-bootstrap/ng-bootstrap';
+import { BrowserModule } from '@angular/platform-browser';
+import { FormsModule } from '@angular/forms';  // Добавьте это
+import { RouterModule, Routes } from '@angular/router';  // Добавьте это
 
-import { AppRoutingModule } from './app-routing.module';
 import { AppComponent } from './app.component';
-import {CommonModule} from "@angular/common";
+import { LoginComponent } from './login/login.component';
+import { RegisterComponent } from './register/register.component';
+import { ChatService } from './services/chat/chat.service';
+
+const routes: Routes = [
+  { path: '', redirectTo: 'login', pathMatch: 'full' },
+  { path: 'login', component: LoginComponent },
+  { path: 'register', component: RegisterComponent },
+  { path: 'chat', component: AppComponent }
+];
 
 @NgModule({
   declarations: [
-    AppComponent
+    AppComponent,
+    LoginComponent,
+    RegisterComponent
   ],
   imports: [
     BrowserModule,
-    HttpClientModule,
-    FormsModule,
-    NgbModule,
-    AppRoutingModule,
-    CommonModule
+    FormsModule,  // Добавьте это
+    RouterModule.forRoot(routes)  // Добавьте это
   ],
-  providers: [],
+  providers: [ChatService],
   bootstrap: [AppComponent]
 })
-export class AppModule {
-}
+export class AppModule { }
