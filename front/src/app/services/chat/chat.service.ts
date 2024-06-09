@@ -11,7 +11,17 @@ export class ChatService {
   private url = 'ws://localhost:8090';
 
   constructor() {
-    this.socket$ = new WebSocketSubject(this.url);
+    const token = localStorage.getItem('token');
+    this.socket$ = new WebSocketSubject({
+      url: this.url,
+      openObserver: {
+        next: () => {
+          if (token) {
+            this.socket$.next({ event: 'auth', data: { token } });
+          }
+        }
+      }
+    });
   }
 
   joinRoom(data: any): void {
@@ -38,11 +48,10 @@ export class ChatService {
 
   login(data: any): Observable<any> {
     const loginSubject = new Subject<any>();
-    this.socket$.next({ event: 'auth', data });
+    this.socket$.next({ event: 'login', data });
 
     this.socket$.subscribe({
       next: (msg) => {
-        console.log(msg)
         if (msg.status === 'authenticated') {
           loginSubject.next(msg);
           loginSubject.complete();
@@ -61,7 +70,7 @@ export class ChatService {
 
     this.socket$.subscribe({
       next: (msg) => {
-        if (msg.event === 'register_response') {
+        if (msg.event === 'register') {
           registerSubject.next(msg.data);
           registerSubject.complete();
         }
@@ -74,8 +83,8 @@ export class ChatService {
   }
 
 
-  subscribeToUserStatusChanges(): Observable<User[]> {
-    const subject = new Subject<User[]>();
+  subscribeToUserStatusChanges(): Observable<string[]> {
+    const subject = new Subject<string[]>();
 
     this.socket$.subscribe(
       (msg) => {
@@ -91,7 +100,7 @@ export class ChatService {
     return subject.asObservable();
   }
 
-  getOnlineUsers(): Promise<User[]> {
+  getOnlineUsers(): Promise<string[]> {
     this.socket$.next({ event: 'getOnlineUsers' });
 
     return this.socket$.pipe(

@@ -1,3 +1,6 @@
+package verticle;
+
+import helper.WebSocketEvent;
 import io.vertx.core.AbstractVerticle;
 import io.vertx.core.AsyncResult;
 import io.vertx.core.Future;
@@ -10,8 +13,9 @@ import io.vertx.core.json.JsonObject;
 
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Set;
-import java.util.stream.Collectors;
+
+import static helper.ConstantHolder.ERROR;
+import static helper.ConstantHolder.STATUS;
 
 public class WebSocketService extends AbstractVerticle {
     private final Map<String, ServerWebSocket> webSocketMap = new HashMap<>();
@@ -27,29 +31,21 @@ public class WebSocketService extends AbstractVerticle {
         System.out.println("WebSocket connection opened");
 
         ws.handler(buffer -> {
+            String wsKey = ws.headers().get("Sec-WebSocket-Key");
+            webSocketMap.put(wsKey, ws);
             String message = buffer.toString();
             System.out.println("Received message: " + message);
             JsonObject json = new JsonObject(message);
             JsonObject data = json.getJsonObject("data");
-            String event = json.getString("event");
-            switch (event) {
-                case "join":
-                    handleJoin(ws, data);
-                    break;
-                case "message":
-                    handleMessage(data, ws);
-                    break;
-                case "auth":
-                    handleAuthentication(ws, data);
-                    break;
-                case "register":
-                    handleRegistration(ws, data);
-                    break;
-                case "getOnlineUsers":
-                    handleOnlineUsers(ws);
-                    break;
-                default:
-                    System.err.println("Unknown event: " + event);
+
+            switch (WebSocketEvent.fromString(json.getString("event"))) {
+                case JOIN -> handleJoin(ws, data, wsKey);
+                case MESSAGE -> handleMessage(data, ws);
+                case LOGIN -> handleLogin(ws, data, wsKey);
+                case REGISTER -> handleRegistration(ws, data);
+                case GET_ONLINE_USERS -> handleOnlineUsers(ws);
+                case AUTH -> handleAuthentication(ws, data, wsKey);
+                default -> System.err.println("Unknown event");
             }
         });
 
@@ -60,8 +56,8 @@ public class WebSocketService extends AbstractVerticle {
             if (wsKey != null) {
                 if (webSocketMap.containsKey(wsKey)) {
                     webSocketMap.remove(wsKey);
-                    vertx.eventBus().send("user.disconnected", wsKey);
-                    // Notify RedisVerticle to unsubscribe
+                    vertx.eventBus().send("user.disconnected", new JsonObject().put("socketId", wsKey));
+                    // Notify verticle.RedisVerticle to unsubscribe
                     JsonObject closeMessage = new JsonObject()
                         .put("action", "unsubscribe")
                         .put("wsId", wsKey);
@@ -80,71 +76,89 @@ public class WebSocketService extends AbstractVerticle {
         });
     }
 
+    private void handleAuthentication(ServerWebSocket ws, JsonObject data, String wsKey) {
+        String token = data.getString("token");
+        System.out.println(token);
+        if (token != null) {
+            verifyToken(token, verification -> {
+                if (verification.succeeded()) {
+                    JsonObject response = verification.result();
+                    if ("ok".equals(response.getString(STATUS))) {
+                        JsonObject principal = response.getJsonObject("principal");
+                        String login = principal.getString("sub");
+                        vertx.eventBus().send("user.connected", new JsonObject()
+                            .put("login", login)
+                            .put("socketId", wsKey));
+                    } else {
+                        // Token verification failed, send error message to client
+                        ws.writeTextMessage(new JsonObject().put(STATUS, ERROR).put("message", "Authentication failed").encode());
+                    }
+                } else {
+                    // Failed to verify token, send error message to client
+                    ws.writeTextMessage(new JsonObject().put(STATUS, ERROR).put("message", "Token verification failed").encode());
+                }
+            });
+        }
+    }
 
 
-    private void handleJoin(ServerWebSocket ws, JsonObject data) {
-        String token = ws.headers().get("jwt_token");
+    private void handleJoin(ServerWebSocket ws, JsonObject data, String wsKey) {
+        String token = data.getString("token");
 
         // Verify token before sending message
         verifyToken(token, verification -> {
             if (verification.succeeded()) {
                 JsonObject response = verification.result();
-                if ("ok".equals(response.getString("status"))) {
-                    String wsKey = ws.headers().get("Sec-WebSocket-Key");
-                    if (wsKey != null) {
-                        String user = data.getString("user");
-                        String room = data.getString("room");
+                if ("ok".equals(response.getString(STATUS))) {
+                    String user = data.getString("user");
+                    String room = data.getString("room");
 
-                        ServerWebSocket existingSocket = webSocketMap.get(wsKey);
-                        if (existingSocket != null && !existingSocket.equals(ws)) {
-                            existingSocket.close();
-                        }
-
-                        webSocketMap.put(wsKey, ws);
-                        System.out.println("User " + user + "joined room: " + room);
-
-                        // Notify RedisVerticle to subscribe to the room
-                        JsonObject joinMessage = new JsonObject()
-                            .put("action", "subscribe")
-                            .put("room", room)
-                            .put("user", user)
-                            .put("wsId", wsKey);
-                        vertx.eventBus().send("redis.action", joinMessage);
-                        System.out.println("Sent subscribe message for room: " + room + " and user: " + user);
-
-                        // Message handler from Redis
-                        vertx.eventBus().consumer("room." + room, message -> {
-                            if (ws.equals(webSocketMap.get(wsKey))) {
-                                ws.writeTextMessage((String) message.body());
-                            }
-                        });
-                    } else {
-                        System.err.println("Sec-WebSocket-Key header is null");
+                    ServerWebSocket existingSocket = webSocketMap.get(wsKey);
+                    if (existingSocket != null && !existingSocket.equals(ws)) {
+                        existingSocket.close();
                     }
+
+                    System.out.println("User " + user + "joined room: " + room);
+
+                    // Notify verticle.RedisVerticle to subscribe to the room
+                    JsonObject joinMessage = new JsonObject()
+                        .put("action", "subscribe")
+                        .put("room", room)
+                        .put("user", user)
+                        .put("wsId", wsKey);
+                    vertx.eventBus().send("redis.action", joinMessage);
+                    System.out.println("Sent subscribe message for room: " + room + " and user: " + user);
+
+                    // Message handler from Redis
+                    vertx.eventBus().consumer("room." + room, message -> {
+                        if (ws.equals(webSocketMap.get(wsKey))) {
+                            ws.writeTextMessage((String) message.body());
+                        }
+                    });
                 } else {
                     // Token verification failed, send error message to client
-                    ws.writeTextMessage(new JsonObject().put("status", "error").put("message", "Authentication failed").encode());
+                    ws.writeTextMessage(new JsonObject().put(STATUS, ERROR).put("message", "Authentication failed").encode());
                 }
             } else {
                 // Failed to verify token, send error message to client
-                ws.writeTextMessage(new JsonObject().put("status", "error").put("message", "Token verification failed").encode());
+                ws.writeTextMessage(new JsonObject().put(STATUS, ERROR).put("message", "Token verification failed").encode());
             }
         });
     }
 
     private void handleMessage(JsonObject data, ServerWebSocket ws) {
-        String token = ws.headers().get("jwt_token");
+        String token = data.getString("token");
 
         // Verify token before sending message
         verifyToken(token, verification -> {
             if (verification.succeeded()) {
                 JsonObject response = verification.result();
-                if ("ok".equals(response.getString("status"))) {
+                if ("ok".equals(response.getString(STATUS))) {
                     // Token is valid, proceed with sending the message
                     String room = data.getString("room");
                     String message = data.encode();
 
-                    // Forward message to RedisVerticle for publishing
+                    // Forward message to verticle.RedisVerticle for publishing
                     JsonObject publishMessage = new JsonObject()
                         .put("action", "publish")
                         .put("room", room)
@@ -153,16 +167,16 @@ public class WebSocketService extends AbstractVerticle {
                     System.out.println("Sent publish message for room: " + room);
                 } else {
                     // Token verification failed, send error message to client
-                    ws.writeTextMessage(new JsonObject().put("status", "error").put("message", "Authentication failed").encode());
+                    ws.writeTextMessage(new JsonObject().put(STATUS, ERROR).put("message", "Authentication failed").encode());
                 }
             } else {
                 // Failed to verify token, send error message to client
-                ws.writeTextMessage(new JsonObject().put("status", "error").put("message", "Token verification failed").encode());
+                ws.writeTextMessage(new JsonObject().put(STATUS, ERROR).put("message", "Token verification failed").encode());
             }
         });
     }
 
-    private void handleAuthentication(ServerWebSocket ws, JsonObject data) {
+    private void handleLogin(ServerWebSocket ws, JsonObject data, String wsKey) {
         String login = data.getString("login");
         String password = data.getString("password");
 
@@ -173,22 +187,21 @@ public class WebSocketService extends AbstractVerticle {
         vertx.eventBus().request("auth.authenticate", request, reply -> {
             if (reply.succeeded()) {
                 JsonObject response = (JsonObject) reply.result().body();
-                if ("ok".equals(response.getString("status"))) {
+                if ("ok".equals(response.getString(STATUS))) {
                     // Handle successful authentication
-                    ws.writeTextMessage(new JsonObject().put("status", "authenticated")
+                    ws.writeTextMessage(new JsonObject().put(STATUS, "authenticated")
                         .put("token", response.getString("token"))
-                            .put("user", login)
+                        .put("user", login)
                         .encode());
                     vertx.eventBus().send("user.connected", new JsonObject()
                         .put("login", login)
-                        .put("socketId", ws.headers().get("Sec-WebSocket-Key")));
-                    webSocketMap.put(ws.headers().get("Sec-WebSocket-Key"), ws);
+                        .put("socketId", wsKey));
                 } else {
                     // Handle authentication failure
-                    ws.writeTextMessage(new JsonObject().put("status", "error").put("message", response.getString("message")).encode());
+                    ws.writeTextMessage(new JsonObject().put(STATUS, ERROR).put("message", response.getString("message")).encode());
                 }
             } else {
-                ws.writeTextMessage(new JsonObject().put("status", "error").put("message", "Authentication failed").encode());
+                ws.writeTextMessage(new JsonObject().put(STATUS, ERROR).put("message", "Authentication failed").encode());
             }
         });
     }
@@ -206,15 +219,15 @@ public class WebSocketService extends AbstractVerticle {
         vertx.eventBus().request("auth.register", request, reply -> {
             if (reply.succeeded()) {
                 JsonObject response = (JsonObject) reply.result().body();
-                if ("ok".equals(response.getString("status"))) {
+                if ("ok".equals(response.getString(STATUS))) {
                     // Handle successful registration
-                    ws.writeTextMessage(new JsonObject().put("status", "registered").encode());
+                    ws.writeTextMessage(new JsonObject().put("event", "register").put("data", new JsonObject().put(STATUS, "ok").put("message", "Registration ok")).encode());
                 } else {
                     // Handle registration failure
-                    ws.writeTextMessage(new JsonObject().put("status", "error").put("message", response.getString("message")).encode());
+                    ws.writeTextMessage(new JsonObject().put("event", "register").put("data", new JsonObject().put(STATUS, ERROR).put("message", response.getString("message"))).encode());
                 }
             } else {
-                ws.writeTextMessage(new JsonObject().put("status", "error").put("message", "Registration failed").encode());
+                ws.writeTextMessage(new JsonObject().put("event", "register").put("data", new JsonObject().put(STATUS, ERROR).put("message", "Registration failed")).encode());
             }
         });
     }
@@ -239,22 +252,21 @@ public class WebSocketService extends AbstractVerticle {
                 if (onlineUsers != null) {
                     ws.writeTextMessage(new JsonObject().put("event", "onlineUsers").put("onlineUsers", onlineUsers).encode());
                 } else {
-                    ws.writeTextMessage(new JsonObject().put("event", "error").put("message", "No online users found").encode());
+                    ws.writeTextMessage(new JsonObject().put("event", ERROR).put("message", "No online users found").encode());
                 }
             } else {
-                ws.writeTextMessage(new JsonObject().put("event", "error").put("message", "Failed to get online users").encode());
+                ws.writeTextMessage(new JsonObject().put("event", ERROR).put("message", "Failed to get online users").encode());
             }
         });
     }
 
     private void handleUserStatusChanged(Message<JsonObject> message) {
         JsonObject body = message.body();
-        JsonObject onlineUsersJson = body.getJsonObject("onlineUsers");
-        String encode = new JsonObject().put("event", "user.statusChanged").put("onlineUsers", onlineUsersJson).encode();
-
+        String onlineUsers = new JsonObject().put("event", "user.statusChanged").put("onlineUsers", body.getJsonArray("onlineUsers")).encode();
+        System.out.println("Поменялися пользаки" + onlineUsers);
         for (Map.Entry<String, ServerWebSocket> entry : webSocketMap.entrySet()) {
             ServerWebSocket socket = entry.getValue();
-            socket.writeTextMessage(encode);
+            socket.writeTextMessage(onlineUsers);
         }
     }
 }

@@ -1,3 +1,5 @@
+package verticle;
+
 import io.vertx.core.AbstractVerticle;
 import io.vertx.core.eventbus.Message;
 import io.vertx.core.json.JsonArray;
@@ -7,7 +9,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 public class UserStatusVerticle extends AbstractVerticle {
-    private Map<String, String> onlineUsers = new HashMap<>();
+    private static Map<String, String> onlineUsers = new HashMap<>();
 
     @Override
     public void start() {
@@ -19,6 +21,7 @@ public class UserStatusVerticle extends AbstractVerticle {
     private void handleUserConnected(Message<JsonObject> message) {
         String userId = message.body().getString("login");
         String socketId = message.body().getString("socketId");
+        System.out.println("put" + userId);
         onlineUsers.put(userId, socketId);
         notifyUserStatusChanged();
     }
@@ -39,6 +42,8 @@ public class UserStatusVerticle extends AbstractVerticle {
     }
 
     private void notifyUserStatusChanged() {
-        vertx.eventBus().publish("user.statusChanged", new JsonObject().put("onlineUsers", onlineUsers));
+        JsonArray onlineUsersArray = new JsonArray();
+        onlineUsers.keySet().forEach(onlineUsersArray::add);
+        vertx.eventBus().publish("user.statusChanged", new JsonObject().put("onlineUsers", onlineUsersArray));
     }
 }

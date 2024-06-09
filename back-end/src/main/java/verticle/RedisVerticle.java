@@ -1,3 +1,5 @@
+package verticle;
+
 import io.vertx.core.AbstractVerticle;
 import io.vertx.core.eventbus.Message;
 import io.vertx.core.json.JsonObject;
@@ -6,11 +8,15 @@ import io.vertx.redis.client.Redis;
 import io.vertx.redis.client.RedisConnection;
 import io.vertx.redis.client.RedisOptions;
 import io.vertx.redis.client.Request;
+import helper.PasswordHelper;
 
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+
+import static helper.ConstantHolder.ERROR;
+import static helper.ConstantHolder.STATUS;
 
 public class RedisVerticle extends AbstractVerticle {
     private Redis redis;
@@ -69,15 +75,30 @@ public class RedisVerticle extends AbstractVerticle {
         String login = data.getString("login");
         String password = data.getString("password");
 
-        redis.send(Request.cmd(Command.HSET)
-            .arg("user:" + login)
-            .arg("password")
-            .arg(password)).onSuccess(res -> {
-            System.out.println("User registered: " + login);
-            message.reply(new JsonObject().put("status", "ok"));
+        String userKey = "user:" + login; // Формируем ключ для хранения данных пользователя
+
+        // Проверка, существует ли пользователь
+        redis.send(Request.cmd(Command.HEXISTS).arg(userKey).arg("password")).onSuccess(exists -> {
+            if (exists.toInteger() == 0) {
+                // Пользователь не существует, добавляем его
+                redis.send(Request.cmd(Command.HSET)
+                    .arg(userKey)
+                    .arg("password")
+                    .arg(password)).onSuccess(res -> {
+                    System.out.println("User registered: " + login);
+                    message.reply(new JsonObject().put(STATUS, "ok"));
+                }).onFailure(err -> {
+                    System.err.println("Failed to register user: " + err.getMessage());
+                    message.reply(new JsonObject().put(STATUS, ERROR).put("message", "Registration failed"));
+                });
+            } else {
+                // Пользователь уже существует
+                System.out.println("User already exists: " + login);
+                message.reply(new JsonObject().put(STATUS, ERROR).put("message", "User already exists"));
+            }
         }).onFailure(err -> {
-            System.err.println("Failed to register user: " + err.getMessage());
-            message.reply(new JsonObject().put("status", "error").put("message", "Registration failed"));
+            System.err.println("Failed to check user existence: " + err.getMessage());
+            message.reply(new JsonObject().put(STATUS, ERROR).put("message", "Failed to check user existence"));
         });
     }
 
@@ -88,13 +109,13 @@ public class RedisVerticle extends AbstractVerticle {
         redis.send(Request.cmd(Command.HGET)
             .arg("user:" + login).arg("password")).onSuccess(res -> {
             if (res != null && PasswordHelper.isValid(res.toBytes(), password)) {
-                message.reply(new JsonObject().put("status", "ok"));
+                message.reply(new JsonObject().put(STATUS, "ok"));
             } else {
-                message.reply(new JsonObject().put("status", "error").put("message", "Invalid credentials"));
+                message.reply(new JsonObject().put(STATUS, ERROR).put("message", "Invalid credentials"));
             }
         }).onFailure(err -> {
             System.err.println("Failed to authenticate user: " + err.getMessage());
-            message.reply(new JsonObject().put("status", "error").put("message", "Authentication failed"));
+            message.reply(new JsonObject().put(STATUS, ERROR).put("message", "Authentication failed"));
         });
     }
 

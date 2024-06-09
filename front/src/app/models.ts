@@ -4,9 +4,9 @@ export interface User {
 }
 
 export interface Message {
-  userName: string;
+  login: string;
   message: string;
-  timestamp: string;
+  date: string;
 }
 
 export interface MessageResponse {

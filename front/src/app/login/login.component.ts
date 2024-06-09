@@ -15,7 +15,6 @@ export class LoginComponent {
 
   login(): void {
     this.chatService.login({ login: this.username, password: this.password }).subscribe(response => {
-      console.log(response)
       localStorage.setItem('token', JSON.stringify(response.token));
       localStorage.setItem('currentUser', JSON.stringify(response.user));
       this.router.navigate(['/chat']);

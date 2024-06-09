@@ -1,0 +1,48 @@
+<router-outlet></router-outlet>
+
+<div *ngIf="showScreen" class="container-fluid">
+  <div class="row">
+    <div class="col-md-4">
+      <div class="user-list-card">
+        <div class="user-card"
+             [ngClass]="user?.login === selectedUser?.login ? 'active' : null"
+             *ngFor="let user of onlineUsers"
+             (click)="user?.login && selectUserHandler(user.login)">
+          <img [src]="user?.image" [alt]="user?.login" class="avatar"/>
+          <p class="username">{{user?.login}}</p>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-8">
+      <div class="chat-container">
+        <ng-container *ngIf="selectedUser">
+          <div class="chat-header">
+            <img [src]="selectedUser?.image" [alt]="selectedUser?.login" class="avatar"/>
+            <p class="username">{{selectedUser?.login}}</p>
+          </div>
+          <div class="chat-body">
+            <div *ngFor="let item of messageArray.get(roomId)">
+              <div [ngClass]="item?.login === currentUser ? 'same-user' : null">
+                <p class="message-container">{{item?.message}}</p>
+                <span class="timestamp">{{item?.date | date:'shortTime'}}</span>
+              </div>
+            </div>
+          </div>
+          <div class="chat-footer">
+            <div class="row">
+              <div class="col-md-10">
+                <div class="form-group mb-0">
+                  <input type="text" placeholder="Type a message" class="form-control" [(ngModel)]="messageText"
+                         (keyup)="($event.keyCode === 13) && sendMessage()"/>
+                </div>
+              </div>
+              <div class="col-md-2 text-center align-self-center">
+                <button class="btn btn-primary btn-sm px-3" (click)="sendMessage()">Send</button>
+              </div>
+            </div>
+          </div>
+        </ng-container>
+      </div>
+    </div>
+  </div>
+</div>

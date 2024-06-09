@@ -1,4 +1,8 @@
 import io.vertx.core.Vertx;
+import verticle.JwtAuthVerticle;
+import verticle.RedisVerticle;
+import verticle.UserStatusVerticle;
+import verticle.WebSocketService;
 
 
 public class MainVerticle {
