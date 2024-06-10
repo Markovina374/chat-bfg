@@ -1,0 +1,20 @@
+version: '3'
+
+services:
+  back:
+    build:
+      context: ./back-end/
+    container_name: chatback
+    ports:
+      - "8090:8090"
+      - "6379:6379"
+    environment:
+      - REDIS_HOST=localhost
+      - REDIS_PORT=6379
+
+  front:
+    build:
+      context: ./front/
+    container_name: chatfront
+    ports:
+      - "4200:80"

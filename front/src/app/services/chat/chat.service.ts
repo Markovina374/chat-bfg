@@ -1,7 +1,7 @@
 import { Injectable } from '@angular/core';
 import {filter, first, map, Observable, Subject} from 'rxjs';
 import { WebSocketSubject } from 'rxjs/webSocket';
-import {MessageResponse, User} from "../../models";
+import {Message, MessageResponse, User} from "../../models";
 
 @Injectable({
   providedIn: 'root'
@@ -32,7 +32,7 @@ export class ChatService {
     this.socket$.next({ event: 'message', data });
   }
 
-  getMessage(): Observable<{ user: string, room: string, message: string }> {
+  getMessage(): Observable<{ login: string, room: string, message: string }> {
     return new Observable(observer => {
       this.socket$.subscribe({
         next: (msg) => observer.next(msg),
@@ -106,6 +106,17 @@ export class ChatService {
     return this.socket$.pipe(
       filter(msg => msg.event === 'onlineUsers'),
       map(msg => msg.onlineUsers),
+      first()
+    ).toPromise();
+  }
+
+
+  getMessages(data: any): Promise<Message[]> {
+    this.socket$.next({ event: 'getMessages', data });
+
+    return this.socket$.pipe(
+      filter(msg => msg.event === 'messages'),
+      map(msg => msg.messages),
       first()
     ).toPromise();
   }

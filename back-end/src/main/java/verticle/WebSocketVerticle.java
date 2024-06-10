@@ -17,7 +17,7 @@ import java.util.Map;
 import static helper.ConstantHolder.ERROR;
 import static helper.ConstantHolder.STATUS;
 
-public class WebSocketService extends AbstractVerticle {
+public class WebSocketVerticle extends AbstractVerticle {
     private final Map<String, ServerWebSocket> webSocketMap = new HashMap<>();
 
     @Override
@@ -45,6 +45,7 @@ public class WebSocketService extends AbstractVerticle {
                 case REGISTER -> handleRegistration(ws, data);
                 case GET_ONLINE_USERS -> handleOnlineUsers(ws);
                 case AUTH -> handleAuthentication(ws, data, wsKey);
+                case GET_MESSAGES -> handleGetMessages(ws, data);
                 default -> System.err.println("Unknown event");
             }
         });
@@ -74,6 +75,24 @@ public class WebSocketService extends AbstractVerticle {
         ws.exceptionHandler(exception -> {
             System.err.println("WebSocket error: " + exception.getMessage());
         });
+    }
+
+    private void handleGetMessages(ServerWebSocket ws, JsonObject data) {
+        String room = data.getString("room");
+                    JsonObject request = new JsonObject()
+                        .put("action", "getMessages")
+                        .put("room", room);
+                    vertx.eventBus().request("redis.action", request, reply -> {
+                        if (reply.succeeded()) {
+                            JsonObject resp = (JsonObject) reply.result().body();
+                            JsonArray messages = resp.getJsonArray("messages");
+                            if (messages != null) {
+                                ws.writeTextMessage(new JsonObject().put("event", "messages").put("messages", messages).encode());
+                            }
+                        } else {
+                            ws.writeTextMessage(new JsonObject().put("event", "messages").put("data", new JsonObject().put(STATUS, ERROR).put("message", "Get messages failed")).encode());
+                        }
+                    });
     }
 
     private void handleAuthentication(ServerWebSocket ws, JsonObject data, String wsKey) {
@@ -156,13 +175,18 @@ public class WebSocketService extends AbstractVerticle {
                 if ("ok".equals(response.getString(STATUS))) {
                     // Token is valid, proceed with sending the message
                     String room = data.getString("room");
-                    String message = data.encode();
-
+                    String login = data.getString("login");
+                    String message = data.getString("message");
+                    String date = data.getString("date");
                     // Forward message to verticle.RedisVerticle for publishing
                     JsonObject publishMessage = new JsonObject()
                         .put("action", "publish")
                         .put("room", room)
-                        .put("message", message);
+                        .put("message", new JsonObject()
+                            .put("room",room )
+                            .put("login",login )
+                            .put("message",message )
+                            .put("date", date).encode());
                     vertx.eventBus().send("redis.action", publishMessage);
                     System.out.println("Sent publish message for room: " + room);
                 } else {

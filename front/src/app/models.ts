@@ -10,7 +10,7 @@ export interface Message {
 }
 
 export interface MessageResponse {
-  user: string;
+  login: string;
   room: string;
   message: string;
   date: string;

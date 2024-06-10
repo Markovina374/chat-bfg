@@ -40,16 +40,16 @@ export class ChatComponent implements OnInit {
   }
 
   private initializeChat(): void {
-    this.chatService.getMessage().subscribe((data: { user: string, room: string, message: string, date: string }) => {
+    this.chatService.getMessage().subscribe((data: { login: string, room: string, message: string, date: string }) => {
       const messages = this.messageArray.get(data.room) || [];
       const isDuplicate = messages.some(message =>
         message.message === data.message &&
-        message.login === data.user &&
+        message.login === data.login &&
         message.date === data.date
       );
       if (!isDuplicate) {
         messages.push({
-          login: data.user,
+          login: data.login,
           message: data.message,
           date: data.date
         });
@@ -112,9 +112,26 @@ export class ChatComponent implements OnInit {
     if (user && this.currentUser) {
       this.selectedUser = user;
       this.roomId = this.getRoomId(this.currentUser, user.login);
+      this.setMessages(this.roomId);
       this.messageArray.set(this.roomId, this.messageArray.get(this.roomId) || []);
       this.join(this.currentUser, this.roomId);
     }
+  }
+  setMessages(roomId: string): void {
+    this.chatService.getMessages({room: roomId}).then(mess => {
+      try {
+        const messages: Message[] = mess.map(x => ({ login: x.login,
+          message: x.message,
+          date: x.date}));
+        console.log('1 ' + messages)
+        this.messageArray.set(roomId, messages);
+        console.log('2 ' + this.messageArray)
+      } catch (error) {
+        console.error('Ошибка при разборе JSON пользователей:', error);
+      }
+    }).catch(error => {
+      console.error('Failed to load online users:', error);
+    });
   }
 
   getRoomId(userId: string, selectedUserId: string): string {
@@ -133,7 +150,7 @@ export class ChatComponent implements OnInit {
     if (this.messageText && this.currentUser && this.roomId) {
       const timestamp = new Date().toISOString();
       const messageData: MessageResponse = {
-        user: this.currentUser,
+        login: this.currentUser,
         room: this.roomId,
         message: this.messageText,
         date: timestamp

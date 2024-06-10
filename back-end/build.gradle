@@ -21,6 +21,19 @@ dependencies {
     testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.8.1'
 }
 
+task fatJar(type: Jar) {
+    manifest {
+        attributes 'Main-Class': 'verticle.MainVerticle'
+    }
+    archiveClassifier = "all"
+    from {
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+    with jar
+    duplicatesStrategy "exclude"
+}
+
+
 test {
     useJUnitPlatform()
 }

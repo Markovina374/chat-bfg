@@ -8,7 +8,8 @@ public enum WebSocketEvent {
     LOGIN("login"),
     REGISTER("register"),
     GET_ONLINE_USERS("getOnlineUsers"),
-    AUTH("auth");
+    AUTH("auth"),
+    GET_MESSAGES("getMessages");
 
     private final String value;
     WebSocketEvent(String value) {

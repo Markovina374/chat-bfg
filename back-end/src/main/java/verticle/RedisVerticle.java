@@ -1,7 +1,9 @@
 package verticle;
 
 import io.vertx.core.AbstractVerticle;
+import io.vertx.core.Future;
 import io.vertx.core.eventbus.Message;
+import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
 import io.vertx.redis.client.Command;
 import io.vertx.redis.client.Redis;
@@ -9,11 +11,13 @@ import io.vertx.redis.client.RedisConnection;
 import io.vertx.redis.client.RedisOptions;
 import io.vertx.redis.client.Request;
 import helper.PasswordHelper;
+import io.vertx.redis.client.Response;
 
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import static helper.ConstantHolder.ERROR;
 import static helper.ConstantHolder.STATUS;
@@ -56,17 +60,11 @@ public class RedisVerticle extends AbstractVerticle {
             String wsId = json.getString("wsId");
 
             switch (action) {
-                case "subscribe":
-                    handleSubscribe(room, wsId);
-                    break;
-                case "unsubscribe":
-                    handleUnsubscribe(wsId);
-                    break;
-                case "publish":
-                    handlePublish(room, json.getString("message"));
-                    break;
-                default:
-                    System.err.println("Unknown action: " + action);
+                case "subscribe" -> handleSubscribe(room, wsId);
+                case "unsubscribe" -> handleUnsubscribe(wsId);
+                case "publish" -> handlePublish(room, json.getString("message"));
+                case "getMessages" -> getMessagesFromRoom(message, room);
+                default -> System.err.println("Unknown action: " + action);
             }
         });
     }
@@ -184,12 +182,33 @@ public class RedisVerticle extends AbstractVerticle {
     }
 
     private void handlePublish(String room, String message) {
-        redis.send(Request.cmd(Command.PUBLISH).arg(room).arg(message)).onSuccess(conn -> {
+        redis.send(Request.cmd(Command.PUBLISH)
+            .arg(room)
+            .arg(message)).onSuccess(conn -> {
             System.out.println("Message published to Redis channel: " + room);
         }).onFailure(err -> {
             System.err.println("Failed to publish message to Redis channel: " + room);
             err.printStackTrace();
         });
+        redis.send(Request.cmd(Command.RPUSH)
+            .arg(room)
+            .arg(message)).onSuccess(conn -> {
+            }).onFailure(Throwable::printStackTrace);
     }
 
+
+    public void getMessagesFromRoom(Message<Object> message, String room) {
+        redis.send(Request.cmd(Command.LRANGE)
+            .arg(room)
+            .arg("0")
+            .arg("-1")).onSuccess(res -> {
+                JsonArray messages = new JsonArray(res.stream()
+                    .map(x -> new JsonObject(x.toString()))
+                    .toList());
+                message.reply(new JsonObject().put(STATUS, "ok").put("messages", messages));
+            }).onFailure(err -> {
+            System.err.println("Failed to publish message to Redis channel: " + room);
+            err.printStackTrace();
+        });
+        }
 }
