@@ -1,7 +1,7 @@
 import { NgModule } from '@angular/core';
 import { BrowserModule } from '@angular/platform-browser';
-import { FormsModule } from '@angular/forms';  // Добавьте это
-import { RouterModule, Routes } from '@angular/router';  // Добавьте это
+import { FormsModule } from '@angular/forms';
+import { RouterModule, Routes } from '@angular/router';
 
 import { AppComponent } from './app.component';
 import { LoginComponent } from './login/login.component';
@@ -25,8 +25,8 @@ const routes: Routes = [
   ],
   imports: [
     BrowserModule,
-    FormsModule,  // Добавьте это
-    RouterModule.forRoot(routes)  // Добавьте это
+    FormsModule,
+    RouterModule.forRoot(routes)
   ],
   providers: [ChatService],
   bootstrap: [AppComponent]

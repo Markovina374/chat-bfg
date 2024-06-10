@@ -29,11 +29,9 @@ export class ChatComponent implements OnInit {
     if (!token) {
       this.router.navigate(['/login']);
     } else {
-      // Fetch user details and initialize the chat
       this.initializeChat();
       this.loadOnlineUsers();
       this.subscribeToUserStatusChanges();
-      // Fetch user and user list from server or local storage
       this.currentUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
       this.showScreen = true;
     }
@@ -84,7 +82,6 @@ export class ChatComponent implements OnInit {
       (users) => {
         const logins = users as string[];
 
-        // Обновляем текущий массив onlineUsers, добавляем новых и удаляем отсутствующих
         this.onlineUsers = logins.map(login => {
           const existingUser = this.onlineUsers.find(user => user.login === login);
           if (existingUser) {
@@ -97,7 +94,6 @@ export class ChatComponent implements OnInit {
           }
         });
 
-        // Удаляем текущего пользователя из списка
         this.onlineUsers = this.onlineUsers.filter(user => user.login !== this.currentUser);
 
       },
@@ -123,9 +119,7 @@ export class ChatComponent implements OnInit {
         const messages: Message[] = mess.map(x => ({ login: x.login,
           message: x.message,
           date: x.date}));
-        console.log('1 ' + messages)
         this.messageArray.set(roomId, messages);
-        console.log('2 ' + this.messageArray)
       } catch (error) {
         console.error('Ошибка при разборе JSON пользователей:', error);
       }

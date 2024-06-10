@@ -1,7 +1,9 @@
 package verticle;
 
+import helper.PasswordHelper;
+import helper.RedisActionEvent;
+import helper.RedisAuthAction;
 import io.vertx.core.AbstractVerticle;
-import io.vertx.core.Future;
 import io.vertx.core.eventbus.Message;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
@@ -10,113 +12,131 @@ import io.vertx.redis.client.Redis;
 import io.vertx.redis.client.RedisConnection;
 import io.vertx.redis.client.RedisOptions;
 import io.vertx.redis.client.Request;
-import helper.PasswordHelper;
-import io.vertx.redis.client.Response;
 
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
-import java.util.stream.Collectors;
 
+import static helper.ConstantHolder.ACTION;
 import static helper.ConstantHolder.ERROR;
+import static helper.ConstantHolder.LOGIN;
+import static helper.ConstantHolder.MESSAGE;
+import static helper.ConstantHolder.MESSAGES;
+import static helper.ConstantHolder.OK;
+import static helper.ConstantHolder.PASSWORD;
+import static helper.ConstantHolder.REDIS_ACTION;
+import static helper.ConstantHolder.REDIS_AUTH;
+import static helper.ConstantHolder.ROOM;
 import static helper.ConstantHolder.STATUS;
+import static helper.ConstantHolder.WS_ID;
 
+/**
+ * Вертикл отвечающий за работу с Редисом
+ */
 public class RedisVerticle extends AbstractVerticle {
     private Redis redis;
+
+    /**
+     * Эти 3 мапы служат для того, что бы реализвать корректную подписку на канал сообщений и последующее закрытие конекшена к базе
+     */
     private final Map<String, Set<String>> roomSubscriptions = new HashMap<>();
     private final Map<String, RedisConnection> redisConnections = new HashMap<>();
     private final Map<String, Set<String>> wsSubscriptions = new HashMap<>();
 
+    /**
+     * Стандартный метод инициализации
+     */
     @Override
     public void start() {
         RedisOptions options = new RedisOptions()
-            .setConnectionString("redis://localhost:6379")
+            .setConnectionString("redis://localhost:6379") //todo вынести в файлик конфигурации
             .setMaxPoolSize(128)
             .setMaxWaitingHandlers(512);
         redis = Redis.createClient(vertx, options);
 
-        vertx.eventBus().consumer("redis.auth", message -> {
+        vertx.eventBus().consumer(REDIS_AUTH, message -> {
             JsonObject json = (JsonObject) message.body();
-            String action = json.getString("action");
-
-            switch (action) {
-                case "register":
-                    handleRegister(message, json);
-                    break;
-                case "authenticate":
-                    handleAuthenticate(message, json);
-                    break;
-                default:
-                    System.err.println("Unknown action: " + action);
-                    message.fail(1, "Unknown action");
+            switch (RedisAuthAction.fromString(json.getString(ACTION))) {
+                case REGISTER -> handleRegister(message, json);
+                case AUTHENTICATE -> handleAuthenticate(message, json);
+                default -> message.fail(1, "Unknown action");
             }
         });
 
-        vertx.eventBus().consumer("redis.action", message -> {
+        vertx.eventBus().consumer(REDIS_ACTION, message -> {
             JsonObject json = (JsonObject) message.body();
-            String action = json.getString("action");
-            String room = json.getString("room");
-            String wsId = json.getString("wsId");
+            String room = json.getString(ROOM);
+            String wsId = json.getString(WS_ID);
 
-            switch (action) {
-                case "subscribe" -> handleSubscribe(room, wsId);
-                case "unsubscribe" -> handleUnsubscribe(wsId);
-                case "publish" -> handlePublish(room, json.getString("message"));
-                case "getMessages" -> getMessagesFromRoom(message, room);
-                default -> System.err.println("Unknown action: " + action);
+            switch (RedisActionEvent.fromString(json.getString(ACTION))) {
+                case SUBSCRIBE -> handleSubscribe(room, wsId);
+                case UNSUBSCRIBE -> handleUnsubscribe(wsId);
+                case PUBLISH -> handlePublish(room, json.getString(MESSAGE));
+                case GET_MESSAGES -> getMessagesFromRoom(message, room);
+                default -> message.fail(1, "Unknown action");
             }
         });
     }
 
+    /**
+     * Метод для регистрации новых пользователей, перед регистрацией метод проверяет есть ли уже Юзер с таким логином
+     *
+     * @param message сообщение, по которому отправляюбтся данные назад
+     * @param data    креды пользователя
+     */
     private void handleRegister(Message<Object> message, JsonObject data) {
-        String login = data.getString("login");
-        String password = data.getString("password");
+        String login = data.getString(LOGIN);
+        String password = data.getString(PASSWORD);
 
-        String userKey = "user:" + login; // Формируем ключ для хранения данных пользователя
+        String userKey = "user:" + login;
 
-        // Проверка, существует ли пользователь
-        redis.send(Request.cmd(Command.HEXISTS).arg(userKey).arg("password")).onSuccess(exists -> {
+        redis.send(Request.cmd(Command.HEXISTS).arg(userKey).arg(PASSWORD)).onSuccess(exists -> {
             if (exists.toInteger() == 0) {
-                // Пользователь не существует, добавляем его
                 redis.send(Request.cmd(Command.HSET)
                     .arg(userKey)
-                    .arg("password")
+                    .arg(PASSWORD)
                     .arg(password)).onSuccess(res -> {
-                    System.out.println("User registered: " + login);
-                    message.reply(new JsonObject().put(STATUS, "ok"));
+                    message.reply(new JsonObject().put(STATUS, OK));
                 }).onFailure(err -> {
-                    System.err.println("Failed to register user: " + err.getMessage());
-                    message.reply(new JsonObject().put(STATUS, ERROR).put("message", "Registration failed"));
+                    message.reply(new JsonObject().put(STATUS, ERROR).put(MESSAGE, "Registration failed"));
                 });
             } else {
-                // Пользователь уже существует
-                System.out.println("User already exists: " + login);
-                message.reply(new JsonObject().put(STATUS, ERROR).put("message", "User already exists"));
+                message.reply(new JsonObject().put(STATUS, ERROR).put(MESSAGE, "User already exists"));
             }
         }).onFailure(err -> {
-            System.err.println("Failed to check user existence: " + err.getMessage());
-            message.reply(new JsonObject().put(STATUS, ERROR).put("message", "Failed to check user existence"));
+            message.reply(new JsonObject().put(STATUS, ERROR).put(MESSAGE, "Failed to check user existence"));
         });
     }
 
+    /**
+     * Метод для проверки пароля пользователя для Аутентификации
+     *
+     * @param message сообщение по которому можно отправить обратный ответ
+     * @param data    креды пользователя
+     */
     private void handleAuthenticate(Message<Object> message, JsonObject data) {
-        String login = data.getString("login");
-        String password = data.getString("password");
+        String login = data.getString(LOGIN);
+        String password = data.getString(PASSWORD);
 
         redis.send(Request.cmd(Command.HGET)
-            .arg("user:" + login).arg("password")).onSuccess(res -> {
+            .arg("user:" + login).arg(PASSWORD)).onSuccess(res -> {
             if (res != null && PasswordHelper.isValid(res.toBytes(), password)) {
-                message.reply(new JsonObject().put(STATUS, "ok"));
+                message.reply(new JsonObject().put(STATUS, OK));
             } else {
-                message.reply(new JsonObject().put(STATUS, ERROR).put("message", "Invalid credentials"));
+                message.reply(new JsonObject().put(STATUS, ERROR).put(MESSAGE, "Invalid credentials"));
             }
         }).onFailure(err -> {
-            System.err.println("Failed to authenticate user: " + err.getMessage());
-            message.reply(new JsonObject().put(STATUS, ERROR).put("message", "Authentication failed"));
+            message.reply(new JsonObject().put(STATUS, ERROR).put(MESSAGE, "Authentication failed"));
         });
     }
 
+    /**
+     * Метод подписки на канал
+     *
+     * @param room номер комнаты
+     * @param wsId идентификатор Вебсокета
+     */
     private void handleSubscribe(String room, String wsId) {
         roomSubscriptions.putIfAbsent(room, new HashSet<>());
         roomSubscriptions.get(room).add(wsId);
@@ -129,10 +149,10 @@ public class RedisVerticle extends AbstractVerticle {
                 if (onConnect.succeeded()) {
                     RedisConnection connection = onConnect.result();
                     connection.handler(message -> {
-                        if (message.size() > 0 && "message".equals(message.get(0).toString())) {
+                        if (message.size() > 0 && MESSAGE.equals(message.get(0).toString())) {
                             String receivedMessage = message.get(2).toString();
                             JsonObject receivedJson = new JsonObject(receivedMessage);
-                            String receivedRoom = receivedJson.getString("room");
+                            String receivedRoom = receivedJson.getString(ROOM);
                             vertx.eventBus().publish("room." + receivedRoom, receivedMessage);
                         }
                     });
@@ -152,8 +172,13 @@ public class RedisVerticle extends AbstractVerticle {
         }
     }
 
+    /**
+     * Метод отписки от канала, так как один пользователь может быть подписан на канал, происходит массовая отписка от всех каналов
+     *
+     * @param wsId идентификатор веб-сокета
+     */
+
     private void handleUnsubscribe(String wsId) {
-        System.out.println("Unsubscribing wsId: " + wsId);
         Set<String> rooms = wsSubscriptions.remove(wsId);
         if (rooms != null) {
             for (String room : rooms) {
@@ -181,34 +206,42 @@ public class RedisVerticle extends AbstractVerticle {
         }
     }
 
+    /**
+     * Метод публикации сообщений, не только в канал, но и в обычное множество, для офлайн сообщений
+     *
+     * @param room    идентификатор комнаты\канала
+     * @param message сообщение
+     */
+
     private void handlePublish(String room, String message) {
         redis.send(Request.cmd(Command.PUBLISH)
             .arg(room)
             .arg(message)).onSuccess(conn -> {
-            System.out.println("Message published to Redis channel: " + room);
-        }).onFailure(err -> {
-            System.err.println("Failed to publish message to Redis channel: " + room);
-            err.printStackTrace();
-        });
+        }).onFailure(Throwable::printStackTrace);
         redis.send(Request.cmd(Command.RPUSH)
             .arg(room)
             .arg(message)).onSuccess(conn -> {
-            }).onFailure(Throwable::printStackTrace);
+        }).onFailure(Throwable::printStackTrace);
     }
 
 
+    /**
+     * Метод для получения всех сообщений
+     *
+     * @param message сообщение по которому можно вернуть ответ
+     * @param room    идентификатор комнаты\канала
+     */
     public void getMessagesFromRoom(Message<Object> message, String room) {
         redis.send(Request.cmd(Command.LRANGE)
             .arg(room)
             .arg("0")
             .arg("-1")).onSuccess(res -> {
-                JsonArray messages = new JsonArray(res.stream()
-                    .map(x -> new JsonObject(x.toString()))
-                    .toList());
-                message.reply(new JsonObject().put(STATUS, "ok").put("messages", messages));
-            }).onFailure(err -> {
-            System.err.println("Failed to publish message to Redis channel: " + room);
+            JsonArray messages = new JsonArray(res.stream()
+                .map(x -> new JsonObject(x.toString()))
+                .toList());
+            message.reply(new JsonObject().put(STATUS, OK).put(MESSAGES, messages));
+        }).onFailure(err -> {
             err.printStackTrace();
         });
-        }
+    }
 }
